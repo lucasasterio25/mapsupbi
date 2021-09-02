@@ -1,30 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <title>Interactive Search Quickstart - Azure Maps Web SDK Samples</title>
+    <title>Allow map panning with drawing tools - Azure Maps Web SDK Samples</title>
 
     <meta charset="utf-8" />
-	<link rel="shortcut icon" href="/favicon.ico"/>
+    <link rel="shortcut icon" href="/favicon.ico" />
     <meta http-equiv="x-ua-compatible" content="IE=Edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <meta name="description" content="This tutorial shows how to create an interactive search experience." />
-    <meta name="keywords" content="Microsoft maps, map, gis, API, SDK, services, module, tutorials, search, point of interest, POI" />
+    <meta name="description" content="This sample shows how to allow the map to pan when using the drawing tools with the interaction type set to click." />
+    <meta name="keywords" content="Microsoft maps, map, gis, API, SDK, drawing tools, circle, rectangle, polygon, paint, events, delete" />
     <meta name="author" content="Microsoft Azure Maps" />
 
     <!-- Add references to the Azure Maps Map control JavaScript and CSS files. -->
     <link rel="stylesheet" href="https://atlas.microsoft.com/sdk/javascript/mapcontrol/2/atlas.min.css" type="text/css" />
     <script src="https://atlas.microsoft.com/sdk/javascript/mapcontrol/2/atlas.min.js"></script>
 
-    <!-- Add a reference to the Azure Maps Services Module JavaScript file. -->
-    <script src="https://atlas.microsoft.com/sdk/javascript/service/2/atlas-service.min.js"></script>
+    <!-- Add references to the Azure Maps Map Drawing Tools JavaScript and CSS files. -->
+    <link rel="stylesheet" href="https://atlas.microsoft.com/sdk/javascript/drawing/1/atlas-drawing.min.css" type="text/css" />
+    <script src="https://atlas.microsoft.com/sdk/javascript/drawing/1/atlas-drawing.min.js"></script>
 
-    <script>
-        var map, datasource, popup;
+    <script type='text/javascript'>
+        var map, datasource, drawingManager, currentShape;
 
         function GetMap() {
             //Initialize a map instance.
             map = new atlas.Map('myMap', {
+                center: [-90, 35],
+                zoom: 3,
                 view: 'Auto',
 
                 //Add authentication details for connecting to Azure Maps.
@@ -38,81 +40,41 @@
                     authType: 'subscriptionKey',
                     subscriptionKey: 'fwUJ8BJLQgesRu6jzyIKvpou5Ms3YSZwzXSr7HjHEBE'
                 }
+
+                    //Alternatively, use an Azure Maps key. Get an Azure Maps key at https://azure.com/maps. NOTE: The primary key should be used as the key.
+                    //authType: 'subscriptionKey',
+                    //subscriptionKey: '<Your Azure Maps Key>'
+                }
             });
 
             //Wait until the map resources are ready.
             map.events.add('ready', function () {
-                //Create a data source and add it to the map.
-                datasource = new atlas.source.DataSource();
-                map.sources.add(datasource);
 
-                //Create a layer to render the convex hull as a polygon on the map.
-                map.layers.add(new atlas.layer.PolygonLayer(datasource));
+                //Create an instance of the drawing manager and display the drawing toolbar.
+                drawingManager = new atlas.drawing.DrawingManager(map, {
+                    interactionType: 'click',
+                    toolbar: new atlas.control.DrawingToolbar({
+                        position: 'top-right'
+                    })
+                });
 
-                //Load some HTML markers onto the map.
-                loadMarkers();
-
-                //Calculate the initial convex hull.
-                calculateConvexHull();
+                //When the drawing started, check to see if the interaction type is set to click, and if it is, re-enable panning of the map.
+                map.events.add('drawingstarted', drawingManager, () => {
+                    if (drawingManager.getOptions().interactionType === 'click') {
+                        map.setUserInteraction({ dragPanInteraction: true });
+                    }
+                });
             });
-        }
-
-        function loadMarkers() {
-            //Generate some random HTML markers and make them draggable. 
-            for (var i = 0; i < 15; i++) {
-                //Calculate a random position over the USA.
-                var p = [
-                    Math.random() * 40 - 120,
-                    Math.random() * 20 + 30
-                ];
-
-                //Store the positions in a seperate array for faster updates.
-                positions.push(p);
-
-                //Create a draggable HTML marker.
-                var m = new atlas.HtmlMarker({
-                    draggable: true,
-                    position: p
-                });
-
-                //Store the index information in the properties of the HTML marker.
-                m.properties = { idx: i };
-                
-                //Add a drag event to get the position of the marker. 
-                map.events.add('drag', m, function (e) {
-                    //Update the cooresponding position in the positions array.
-                    positions[e.target.properties.idx] = e.target.getOptions().position;
-
-                    //Calculate a new convex hull.
-                    calculateConvexHull();
-                });
-
-                //Add the marker to the map.
-                map.markers.add(m);
-            }
-        }
-
-        function calculateConvexHull() {
-            //Calculate the convex hull from the positions. 
-            var hull = atlas.math.getConvexHull(positions);
-
-            //Update the data source with the new convex hull polygon. 
-            datasource.setShapes(hull);
-
-            //Calculate the area and perimeter of the convex hull.
-            var p = atlas.math.getLengthOfPath(hull.coordinates[0], 'miles');
-            var a = atlas.math.getArea(hull, 'squareMiles', 1);
-
-            document.getElementById('measurementTbx').innerHTML = `Perimeter: ${Math.round(p*10)/10} miles<br\>Area: ${a} sq miles`;
         }
     </script>
 </head>
 <body onload="GetMap()">
     <div id="myMap" style="position:relative;width:100%;min-width:290px;height:600px;"></div>
 
-    <div id="measurementTbx" style="position:absolute;top:10px;left:10px;background-color:white;border-radius:10px;padding:10px;"></div>
-
-    
+    <fieldset style="width:calc(100% - 30px);min-width:290px;margin-top:10px;">
+        <legend><h1 style="font-size:16px">Allow map panning with drawing tools</h1></legend>
+        This sample shows how to allow the map to pan when using the drawing tools with the interaction type set to click.
+        If the interaction type is set to hybrid or freehand, panning has to be disabled since it uses the same user interactions.
+    </fieldset>
 </body>
-
 </html>
