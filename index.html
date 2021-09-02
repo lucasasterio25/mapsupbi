@@ -20,19 +20,11 @@
     <script src="https://atlas.microsoft.com/sdk/javascript/service/2/atlas-service.min.js"></script>
 
     <script>
-        var map, datasource, client, popup, searchInput, resultsPanel, searchInputLength, centerMapOnResults;
-
-        //The minimum number of characters needed in the search input before a search is performed.
-        var minSearchInputLength = 3;
-
-        //The number of ms between key strokes to wait before performing a search.
-        var keyStrokeDelay = 150;
+        var map, datasource, popup;
 
         function GetMap() {
             //Initialize a map instance.
             map = new atlas.Map('myMap', {
-                center: [-118.270293, 34.039737],
-                zoom: 14,
                 view: 'Auto',
 
                 //Add authentication details for connecting to Azure Maps.
@@ -48,164 +40,177 @@
                 }
             });
 
-            //Store a reference to the Search Info Panel.
-            resultsPanel = document.getElementById("results-panel");
-
-            //Add key up event to the search box. 
-            searchInput = document.getElementById("search-input");
-            searchInput.addEventListener("keyup", searchInputKeyup);
-
-            //Create a popup which we can reuse for each result.
-            popup = new atlas.Popup();
-
             //Wait until the map resources are ready.
             map.events.add('ready', function () {
-
-                //Add the zoom control to the map.
-                map.controls.add(new atlas.control.ZoomControl(), {
-                    position: 'top-right'
+                //Add the Style Control to the map.
+                map.controls.add(new atlas.control.StyleControl({
+                    //Optionally specify which map styles you want to appear in the picker. 
+                    //All styles available with the S0 license tier appear by default in the control. 
+                    //If using a S1 tier license, you can use the mapStyles option to add the 'satellite' and 'satellite_road_labels' styles to the control.
+                    mapStyles: ['road', 'road_shaded_relief', 'grayscale_light', 'night', 'grayscale_dark', 'satellite', 'satellite_road_labels']
+                }), {
+                    position: "top-right"
                 });
 
-                //Create a data source and add it to the map.
+                //Setup the drag & drop listeners on the map.
+                var dropZone = document.getElementById('myMap');
+                dropZone.addEventListener('dragover', handleDragOver, false);
+                dropZone.addEventListener('drop', handleFileSelect, false);
+
+                //Create a data source to store the data in.
                 datasource = new atlas.source.DataSource();
                 map.sources.add(datasource);
+                
+                //Add a layer for rendering the polygons.
+                var polygonLayer = new atlas.layer.PolygonLayer(datasource, null, {
+                    fillColor: '#1e90ff',
+                    filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']]	//Only render Polygon or MultiPolygon in this layer.
+                });
 
-                //Add a layer for rendering the results.
-                var searchLayer = new atlas.layer.SymbolLayer(datasource, null, {
+                //Add a click event to the layer.
+                map.events.add('click', polygonLayer, featureClicked);
+
+                //Add a layer for rendering line data.
+                var lineLayer = new atlas.layer.LineLayer(datasource, null, {
+                    strokeColor: '#1e90ff',
+                    strokeWidth: 4,
+                    filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'MultiLineString']]	//Only render LineString or MultiLineString in this layer.
+                });
+
+                //Add a click event to the layer.
+                map.events.add('click', lineLayer, featureClicked);
+
+                //Add a layer for rendering point data.
+                var pointLayer = new atlas.layer.SymbolLayer(datasource, null, {
                     iconOptions: {
-                        image: 'pin-round-darkblue',
-                        anchor: 'center',
-                        allowOverlap: true
-                    }
+                        allowOverlap: true,
+                        ignorePlacement: true
+                    },
+                    filter: ['any', ['==', ['geometry-type'], 'Point'], ['==', ['geometry-type'], 'MultiPoint']] //Only render Point or MultiPoints in this layer.
                 });
-                map.layers.add(searchLayer);
 
-                //Add a click event to the search layer and show a popup when a result is clicked.
-                map.events.add("click", searchLayer, function (e) {
-                    //Make sure the event occurred on a shape feature.
-                    if (e.shapes && e.shapes.length > 0) {
-                        showPopup(e.shapes[0]);
-                    }
+                //Add a click event to the layer.
+                map.events.add('click', pointLayer, featureClicked);
+
+                //Add polygon and line layers to the map, below the labels..
+                map.layers.add([
+                    polygonLayer,
+
+                    //Add a layer for rendering the outline of polygons.
+                    new atlas.layer.LineLayer(datasource, null, {
+                        strokeColor: 'black',
+                        filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']]	//Only render Polygon or MultiPolygon in this layer.
+                    }),
+
+                    lineLayer, pointLayer
+                ], 'labels');
+
+
+                //Add the point layer above the labels. 
+                map.layers.add(pointLayer);
+
+                //Create a popup but leave it closed so we can update it and display it later.
+                popup = new atlas.Popup({
+                    position: [0, 0]
                 });
             });
         }
-        function searchInputKeyup(e) {
-            centerMapOnResults = false;
-            if (searchInput.value.length >= minSearchInputLength) {
-                if (e.keyCode === 13) {
-                    centerMapOnResults = true;
-                }
-                //Wait 100ms and see if the input length is unchanged before performing a search. 
-                //This will reduce the number of queries being made on each character typed.
-                setTimeout(function () {
-                    if (searchInputLength == searchInput.value.length) {
-                        search();
-                    }
-                }, keyStrokeDelay);
-            } else {
-                resultsPanel.innerHTML = '';
-            }
-            searchInputLength = searchInput.value.length;
+
+        function handleDragOver(evt) {
+            //Stop the browser from performing its default behavior when a file is dragged and dropped.
+            evt.stopPropagation();
+            evt.preventDefault();
+
+            evt.dataTransfer.dropEffect = 'copy';
         }
-        function search() {
-            //Remove any previous results from the map.
+
+        function handleFileSelect(evt) {
+            //Stop the browser from performing its default behavior when a file is dragged and dropped.
+            evt.stopPropagation();
+            evt.preventDefault();
+
+            //Remove any existing data from the map.
             datasource.clear();
-            popup.close();
-            resultsPanel.innerHTML = '';
 
-            //Use MapControlCredential to share authentication between a map control and the service module.
-            var pipeline = atlas.service.MapsURL.newPipeline(new atlas.service.MapControlCredential(map));
+            //The list of files that have been dragged and dropped onto the map.
+            var files = evt.dataTransfer.files;
 
-            //Construct the SearchURL object
-            var searchURL = new atlas.service.SearchURL(pipeline);
+            //Keep track of the bounding box of all the data from all files dropped into the map.
+            var dataBounds = null;
 
-            var query = document.getElementById("search-input").value;
-            searchURL.searchPOI(atlas.service.Aborter.timeout(10000), query, {
-                lon: map.getCamera().center[0],
-                lat: map.getCamera().center[1],
-                maxFuzzyLevel: 4,
-                view: 'Auto'
-            }).then((results) => {
+            //Loop through and attempt to read each file. 
+            for (var i = 0; i < files.length; i++) {
+                var reader = new FileReader();
 
-                //Extract GeoJSON feature collection from the response and add it to the datasource
-                var data = results.geojson.getFeatures();
-                datasource.add(data);
+                reader.onload = function (e) {
+                    try {
+                        var geojsonData = JSON.parse(e.target.result);
 
-                if (centerMapOnResults) {
-                    map.setCamera({
-                        bounds: data.bbox
-                    });
-                }
-                console.log(data);
-                //Create the HTML for the results list.
-                var html = [];
-                for (var i = 0; i < data.features.length; i++) {
-                    var r = data.features[i];
-                    html.push('<li onclick="itemClicked(\'', r.id, '\')" onmouseover="itemHovered(\'', r.id, '\')">')
-                    html.push('<div class="title">');
-                    if (r.properties.poi && r.properties.poi.name) {
-                        html.push(r.properties.poi.name);
-                    } else {
-                        html.push(r.properties.address.freeformAddress);
-                    }
-                    html.push('</div><div class="info">', r.properties.type, ': ', r.properties.address.freeformAddress, '</div>');
-                    if (r.properties.poi) {
-                        if (r.properties.phone) {
-                            html.push('<div class="info">phone: ', r.properties.poi.phone, '</div>');
+                        //Add the GeoJSON data to the data source.
+                        datasource.add(geojsonData);
+                        
+                        //Calculate the bounding box of the GeoJSON data.
+                        var bounds = atlas.data.BoundingBox.fromData(geojsonData);
+
+                        //If data is already loaded from another GeoJSON file, merge the bounding boxes together.
+                        if (dataBounds) {
+                            dataBounds = atlas.data.BoundingBox.merge(dataBounds, bounds);
+                        } else {
+                            dataBounds = bounds;
                         }
-                        if (r.properties.poi.url) {
-                            html.push('<div class="info"><a href="http://', r.properties.poi.url, '">http://', r.properties.poi.url, '</a></div>');
-                        }
+
+                        //Update the map view to show the data.
+                        map.setCamera({
+                            bounds: dataBounds,
+                            padding: 50
+                        });
+                    } catch (e) {
+                        alert('Unable to read file as GeoJSON.');
                     }
-                    html.push('</li>');
-                    resultsPanel.innerHTML = html.join('');
+                };
+
+                //Read the file as text.
+                reader.readAsText(files[i]);
+            }
+        }
+
+        function featureClicked(e) {
+            //Make sure the event occurred on a shape feature.
+            if (e.shapes && e.shapes.length > 0) {
+                //By default, show the popup where the mouse event occurred.
+                var pos = e.position;
+                var offset = [0, 0];
+                var properties;
+
+                if (e.shapes[0] instanceof atlas.Shape) {
+                    properties = e.shapes[0].getProperties();
+
+                    //If the shape is a point feature, show the popup at the points coordinate.
+                    if (e.shapes[0].getType() === 'Point') {
+                        pos = e.shapes[0].getCoordinates();
+                        offset = [0, -18];
+                    }
+                } else {
+                    properties = e.shapes[0].properties;
+
+                    //If the shape is a point feature, show the popup at the points coordinate.
+                    if (e.shapes[0].type === 'Point') {
+                        pos = e.shapes[0].geometry.coordinates;
+                        offset = [0, -18];
+                    }
                 }
 
-            });
-        }
-        function itemHovered(id) {
-            //Show a popup when hovering an item in the result list.
-            var shape = datasource.getShapeById(id);
-            showPopup(shape);
-        }
-        function itemClicked(id) {
-            //Center the map over the clicked item from the result list.
-            var shape = datasource.getShapeById(id);
-            map.setCamera({
-                center: shape.getCoordinates(),
-                zoom: 17
-            });
-        }
-        function showPopup(shape) {
-            var properties = shape.getProperties();
-            //Create the HTML content of the POI to show in the popup.
-            var html = ['<div class="poi-box">'];
-            //Add a title section for the popup.
-            html.push('<div class="poi-title-box"><b>');
+                //Update the content and position of the popup.
+                popup.setOptions({
+                    //Create a table from the properties in the feature.
+                    content: atlas.PopupTemplate.applyTemplate(properties),
+                    position: pos,
+                    pixelOffset: offset
+                });
 
-            if (properties.poi && properties.poi.name) {
-                html.push(properties.poi.name);
-            } else {
-                html.push(properties.address.freeformAddress);
+                //Open the popup.
+                popup.open(map);
             }
-            html.push('</b></div>');
-            //Create a container for the body of the content of the popup.
-            html.push('<div class="poi-content-box">');
-            html.push('<div class="info location">', properties.address.freeformAddress, '</div>');
-            if (properties.poi) {
-                if (properties.poi.phone) {
-                    html.push('<div class="info phone">', properties.phone, '</div>');
-                }
-                if (properties.poi.url) {
-                    html.push('<div><a class="info website" href="http://', properties.poi.url, '">http://', properties.poi.url, '</a></div>');
-                }
-            }
-            html.push('</div></div>');
-            popup.setOptions({
-                position: shape.getCoordinates(),
-                content: html.join('')
-            });
-            popup.open(map);
         }
     </script>
     <style>
@@ -354,15 +359,7 @@
 <body onload="GetMap()">
     <div id="myMap"></div>
 
-    <div id="search">
-        <div class="search-input-box">
-            <div class="search-input-group">
-                <div class="search-icon" type="button"></div>
-                <input id="search-input" type="text" placeholder="Search">
-            </div>
-        </div>
-        <ul id="results-panel"></ul>
-    </div>
+    
 </body>
 
 </html>
